@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { width: 320px; padding: 15px; font-family: sans-serif; }
+        button { width: 100%; padding: 10px; margin-top: 5px; cursor: pointer; }
+        input { width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box; }
+        .group { border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; border-radius: 5px; }
+        h4 { margin: 0 0 10px 0; }
+        #status { margin-top: 10px; color: blue; font-size: 12px;}
+    </style>
+</head>
+<body>
+    <div class="group">
+        <h4>Run</h4>
+        <button id="btnStart">Initialize recording</button>
+    </div>
+
+    <div class="group">
+        <h4>Record</h4>
+        <input type="text" id="snapshotName" placeholder="Snapshot name (optional)">
+        <div style="margin-top:6px"> 
+            <strong style="font-size:12px">Save options</strong>
+            <label style="display:flex;align-items:center;margin-top:6px;font-size:12px;gap:4px;">
+                <input type="checkbox" id="saveCookies" style="width:auto;margin-top:0;">
+                <span>Save Cookies</span>
+            </label>
+            <label style="display:flex;align-items:center;margin-top:4px;font-size:12px;gap:4px;">
+                <input type="checkbox" id="saveLocalStorage" style="width:auto;margin-top:0;">
+                <span>Save LocalStorage</span>
+            </label>
+            <label style="display:flex;align-items:center;margin-top:4px;font-size:12px;gap:4px;">
+                <input type="checkbox" id="saveSessionStorage" style="width:auto;margin-top:0;">
+                <span>Save SessionStorage</span>
+            </label>
+            <label style="display:flex;align-items:center;margin-top:4px;font-size:12px;gap:4px;">
+                <input type="checkbox" id="saveNetwork" style="width:auto;margin-top:0;">
+                <span>Save Network logs (fetch/XHR/etc.)</span>
+            </label>
+            <label style="display:flex;align-items:center;margin-top:6px;font-size:12px;gap:4px;">
+                <input type="checkbox" id="includeDom" style="width:auto;margin-top:0;">
+                <span>Save DOM snapshot (HTML)</span>
+            </label>
+        </div>
+        <button id="btnSave">Save to MongoDB</button>
+    </div>
+
+    <div class="group">
+        <h4>Apply</h4>
+        <input type="text" id="snapshotId" placeholder="Snapshot ID or name">
+        <div style="margin-top:6px"> 
+            <strong style="font-size:12px">Load / Apply options</strong>
+            <label style="display:flex;align-items:center;margin-top:6px;font-size:12px;gap:4px;">
+                <input type="checkbox" id="applyCookies" style="width:auto;margin-top:0;">
+                <span>Apply Cookies</span>
+            </label>
+            <label style="display:flex;align-items:center;margin-top:4px;font-size:12px;gap:4px;">
+                <input type="checkbox" id="applyLocalStorage" style="width:auto;margin-top:0;">
+                <span>Apply LocalStorage</span>
+            </label>
+            <label style="display:flex;align-items:center;margin-top:4px;font-size:12px;gap:4px;">
+                <input type="checkbox" id="applySessionStorage" style="width:auto;margin-top:0;">
+                <span>Apply SessionStorage</span>
+            </label>
+            <label style="display:flex;align-items:center;margin-top:4px;font-size:12px;gap:4px;">
+                <input type="checkbox" id="applyNetwork" style="width:auto;margin-top:0;">
+                <span>Apply Network mocks</span>
+            </label>
+            <label style="display:flex;align-items:center;margin-top:6px;font-size:12px;gap:4px;">
+                <input type="checkbox" id="applyDom" style="width:auto;margin-top:0;">
+                <span>Apply DOM snapshot (HTML)</span>
+            </label>
+        </div>
+        <button id="btnLoad">Load and apply</button>
+    </div>
+
+    <!-- <div class="group">
+        <h4>Test</h4>
+        <button id="btnTest" style="margin-top:6px;">Test capture</button>
+    </div> -->
+
+    <div class="group">
+        <h4>Status</h4>
+        <div id="status">Ready</div>
+    </div>
+    
+    <script src="popup.js"></script>
+</body>
+</html>

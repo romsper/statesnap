@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "StateSnap",
+  "description": "Capture and restore the state of web pages with ease. Save your progress, settings, and more!",
+  "version": "1.0",
+  "permissions": [
+    "storage",
+    "cookies",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["recorder_injector.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_about_blank": true
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "StateSnap"
+  }
+}
