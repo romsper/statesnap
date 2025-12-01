@@ -1,4 +1,5 @@
 # StateSnap
+[![](https://img.shields.io/badge/-LinkedIn-blue?style=flat&logo=Linkedin&logoColor=white)](https://www.linkedin.com/in/romsper/) [![](https://img.shields.io/static/v1?label=Telegram&message=%23&logo=Telegram&color=%23fe8e86)](http://t.me/romsper_qa_buddy) ![](https://komarev.com/ghpvc/?username=romsper) 
 
 StateSnap captures a browser tab's runtime state (cookies, local/session storage, network activity and DOM snapshot) and saves it to a small Ktor backend which persists snapshots into MongoDB. It includes two main components:
 
