@@ -56,7 +56,12 @@ All endpoints use JSON request and response bodies unless noted.
 4. Get snapshot by id or description
    - Method: GET  
    - Path: `/snapshot/lookup/{term}`  
-   - Description: Lookup by id or description (tries _id first, then description).  
+   - Description: Lookup by id or description (tries _id first, then description).
+
+5. Delete snapshot
+   - Method: DELETE
+   - Path: `/snapshots/{id}`  
+   - Description: Deletes a snapshot by its identifier.
 
 ## Notes
 

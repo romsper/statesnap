@@ -34,3 +34,9 @@ data class NetworkLog(
     val status: Int? = null,
     val responseBody: String? = null
 )
+
+@Serializable
+data class StatusResponse(
+    val status: String,
+    val message: String
+)

@@ -21,6 +21,12 @@ fun Application.configureRouting(snapshots: CoroutineCollection<Snapshot>) {
             call.respondText("Snapshot Service is running...", ContentType.Text.Plain)
         }
 
+        // List recent snapshots
+        get("/snapshots") {
+            val list = snapshots.find().limit(20).toList()
+            call.respond(list)
+        }
+
         // Save snapshot state
         post("/snapshot") {
             try {
@@ -35,10 +41,18 @@ fun Application.configureRouting(snapshots: CoroutineCollection<Snapshot>) {
                     }
                 } ?: snapshot._id ?: ""
 
-                call.respond(HttpStatusCode.Created, mapOf("status" to "saved", "id" to insertedId))
+                val savedSnapshot = snapshots.findOneById(insertedId)
+                if (savedSnapshot != null) {
+                    call.respond(HttpStatusCode.Created, savedSnapshot)
+                } else {
+                    call.respond(
+                        HttpStatusCode.InternalServerError,
+                        StatusResponse("error", "Failed to retrieve saved snapshot")
+                    )
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
-                call.respond(HttpStatusCode.InternalServerError, e.localizedMessage)
+                call.respond(HttpStatusCode.InternalServerError, StatusResponse("error", e.message ?: "Unknown error"))
             }
         }
 
@@ -46,7 +60,7 @@ fun Application.configureRouting(snapshots: CoroutineCollection<Snapshot>) {
         get("/snapshot/{id}") {
             val id = call.parameters["id"]
             if (id == null) {
-                call.respond(HttpStatusCode.BadRequest, "Missing ID")
+                call.respond(HttpStatusCode.BadRequest, StatusResponse("error", "Missing ID"))
                 return@get
             }
 
@@ -59,7 +73,7 @@ fun Application.configureRouting(snapshots: CoroutineCollection<Snapshot>) {
             if (doc != null) {
                 call.respond(doc)
             } else {
-                call.respond(HttpStatusCode.NotFound, "Snapshot not found")
+                call.respond(HttpStatusCode.NotFound, StatusResponse("error", "Snapshot id:$id not found"))
             }
         }
 
@@ -67,7 +81,7 @@ fun Application.configureRouting(snapshots: CoroutineCollection<Snapshot>) {
         get("/snapshot/lookup/{term}") {
             val term = call.parameters["term"]
             if (term == null) {
-                call.respond(HttpStatusCode.BadRequest, "Missing term")
+                call.respond(HttpStatusCode.BadRequest, StatusResponse("error", "Missing term "))
                 return@get
             }
 
@@ -79,14 +93,23 @@ fun Application.configureRouting(snapshots: CoroutineCollection<Snapshot>) {
             if (doc != null) {
                 call.respond(doc)
             } else {
-                call.respond(HttpStatusCode.NotFound, "Snapshot not found")
+                call.respond(HttpStatusCode.NotFound, StatusResponse("error", "Snapshot not found for term:$term"))
             }
         }
 
-        // List recent snapshots
-        get("/snapshots") {
-            val list = snapshots.find().limit(20).toList()
-            call.respond(list.map { mapOf("id" to (it._id ?: ""), "url" to it.url, "date" to it.timestamp) })
+        delete("/snapshot/{id}") {
+            val id = call.parameters["id"]
+            if (id == null) {
+                call.respond(HttpStatusCode.BadRequest, StatusResponse("error", "Missing ID"))
+                return@delete
+            }
+
+            val result = snapshots.deleteOneById(id)
+            if (result.deletedCount > 0) {
+                call.respond(HttpStatusCode.OK, StatusResponse("success", "Snapshot id:$id deleted"))
+            } else {
+                call.respond(HttpStatusCode.NotFound, StatusResponse("error", "Snapshot id:$id not found"))
+            }
         }
     }
 }

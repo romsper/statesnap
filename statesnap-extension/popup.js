@@ -78,6 +78,11 @@ document.getElementById('btnSave').addEventListener('click', async () => {
         return;
     }
 
+    if (!/^https?:\/\//i.test(tabUrl)) {
+        setStatus('Unsupported tab URL');
+        return;
+    }
+
     // 1. Collect data from the page context (LocalStorage, Logs)
     const wantDom = includeDomCheckbox?.checked ?? false;
     const wantLS = saveLocalStorageCheckbox?.checked ?? false;
@@ -121,10 +126,27 @@ document.getElementById('btnSave').addEventListener('click', async () => {
     }
     const dedupedLogs = Array.from(dedupeMap.values());
 
+    // Ensure logs conform to NetworkLog: method/url non-null strings
+    const sanitizedLogs = dedupedLogs
+        .map((l) => {
+            const method = l && l.method ? String(l.method) : 'GET';
+            const url = l && l.url ? String(l.url) : '';
+            if (!url) return null;
+            return {
+                method,
+                url,
+                requestBody: l && l.requestBody != null ? String(l.requestBody) : null,
+                status: (l && typeof l.status === 'number') ? l.status : null,
+                // cap response body to 200k chars to avoid huge payloads
+                responseBody: (l && l.responseBody != null) ? String(l.responseBody).slice(0, 200 * 1024) : null
+            };
+        })
+        .filter(Boolean);
+
     const pageData = {
         ls: firstFrame.ls || {},
         ss: firstFrame.ss || {},
-        logs: dedupedLogs,
+        logs: sanitizedLogs,
         html: firstFrame.html || null
     };
 
@@ -132,42 +154,38 @@ document.getElementById('btnSave').addEventListener('click', async () => {
     let cookies = [];
     if (saveCookiesCheckbox?.checked) {
         try {
-            const tabUrl = tab && tab.url ? String(tab.url) : '';
-            if (/^https?:\/\//i.test(tabUrl)) {
-                cookies = await chrome.cookies.getAll({ url: tabUrl });
+            const tabUrl2 = tab && tab.url ? String(tab.url) : '';
+            if (/^https?:\/\//i.test(tabUrl2)) {
+                cookies = await chrome.cookies.getAll({ url: tabUrl2 });
             } else {
-                console.warn('[StateSnap] Skipping cookies: tab URL not http(s):', tabUrl);
+                console.warn('[StateSnap] Skipping cookies: tab URL not http(s):', tabUrl2);
                 cookies = [];
             }
         } catch (e) {
             console.warn('[StateSnap] Error getting cookies for tab:', e);
             cookies = [];
         }
-    } else {
-        cookies = [];
     }
+
+    // Map Chrome cookies to CookieModel
+    const cookieModels = (cookies || []).map(c => ({
+        name: String(c.name || ''),
+        value: String(c.value || ''),
+        domain: String(c.domain || ''),
+        path: String(c.path || '/'),
+        secure: !!c.secure,
+        httpOnly: !!c.httpOnly,
+        expirationDate: typeof c.expirationDate === 'number' ? c.expirationDate : null
+    }));
 
     const snapshot = {
         timestamp: Date.now(),
-        url: tab.url,
+        url: tabUrl,
         description: snapshotNameInput?.value?.trim() || undefined,
-        cookies: cookies,
+        cookies: cookieModels,
         localStorage: pageData.ls,
         sessionStorage: pageData.ss,
-        networkLogs: (pageData.logs || []).map((l) => {
-            try {
-                return {
-                    method: l && l.method ? String(l.method) : null,
-                    url: l && l.url ? String(l.url) : null,
-                    requestBody: l && l.requestBody != null ? String(l.requestBody) : null,
-                    status: (l && typeof l.status === 'number') ? l.status : null,
-                    // cap response body to 200k chars to avoid huge payloads
-                    responseBody: (l && l.responseBody != null) ? String(l.responseBody).slice(0, 200 * 1024) : null
-                };
-            } catch (e) {
-                return { method: null, url: null, requestBody: null, status: null, responseBody: null };
-            }
-        }),
+        networkLogs: pageData.logs,
         html: pageData.html
     };
 
@@ -188,7 +206,7 @@ document.getElementById('btnSave').addEventListener('click', async () => {
             throw new Error("Invalid JSON from server");
         });
 
-        const id = resData.id || resData._id || "<no-id>";
+        const id = (resData && (resData._id || resData.id)) || "<no-id>";
         setStatus(`Saved! ID: ${id}`);
         if (navigator.clipboard && id && id !== "<no-id>") {
             navigator.clipboard.writeText(id).catch(() => {});
@@ -267,7 +285,7 @@ document.getElementById('btnLoad').addEventListener('click', async () => {
 
     try {
         // Allow backend to interpret this as either ID or name.
-        const response = await fetch(`http://localhost:8080/snapshot/${encodeURIComponent(idOrName)}`);
+        const response = await fetch(`${API_URL}/snapshot/${encodeURIComponent(idOrName)}`);
         if (!response.ok) throw new Error("Snapshot not found");
         const snapshot = await response.json();
 
@@ -292,19 +310,24 @@ document.getElementById('btnLoad').addEventListener('click', async () => {
         setStatus("Setting cookies...");
         if (applyCookiesCheckbox?.checked) {
             for (const c of (snapshot.cookies || [])) {
-                const cookieUrl = "http" + (c.secure ? "s" : "") + "://" + c.domain.replace(/^\./, '') + c.path;
+                const domain = String(c.domain || '').replace(/^\./, '');
+                const path = c.path || '/';
+                const cookieUrl = "http" + (c.secure ? "s" : "") + "://" + domain + path;
                 try {
-                    await chrome.cookies.set({
+                    const cookieDetails = {
                         url: cookieUrl,
                         name: c.name,
                         value: c.value,
                         domain: c.domain,
                         path: c.path,
-                        secure: c.secure,
-                        httpOnly: c.httpOnly,
-                        expirationDate: c.expirationDate
-                    });
-                } catch (e) { console.warn("Cookie error: ", c.name, e); }
+                        secure: !!c.secure,
+                        httpOnly: !!c.httpOnly
+                    };
+                    if (typeof c.expirationDate === 'number') {
+                        cookieDetails.expirationDate = c.expirationDate;
+                    }
+                    await chrome.cookies.set(cookieDetails);
+                } catch (e) { console.warn("Cookie error: ", c && c.name, e); }
             }
         } else {
             console.log('[StateSnap] Skipping cookie restore (applyCookies unchecked)');
