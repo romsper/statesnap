@@ -14,7 +14,7 @@ fun main(args: Array<String>) {
 }
 
 fun Application.module() {
-//    configureHTTP()
+    configureHTTP()
     configureSerialization()
     val database = configureDatabases()
     val snapshots = database.getCollection<Snapshot>("snapshots")

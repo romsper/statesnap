@@ -18,10 +18,11 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["recorder_injector.js"],
+      "js": ["recorder.js", "replayer.js"],
       "run_at": "document_start",
       "all_frames": true,
-      "match_about_blank": true
+      "match_about_blank": true,
+      "world": "MAIN"
     }
   ],
   "action": {

@@ -1,89 +1,246 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
     <style>
-        body { width: 320px; padding: 15px; font-family: sans-serif; }
-        button { width: 100%; padding: 10px; margin-top: 5px; cursor: pointer; }
-        input { width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box; }
-        .group { border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; border-radius: 5px; }
-        h4 { margin: 0 0 10px 0; }
-        #status { margin-top: 10px; color: blue; font-size: 12px;}
+        :root {
+            --accent: #6366f1;
+            --accent-press: #4f46e5;
+            --accent-soft: #eef2ff;
+            --bg: #ffffff;
+            --panel: #f8fafc;
+            --card: #ffffff;
+            --border: #e2e8f0;
+            --text: #0f172a;
+            --muted: #64748b;
+            --danger: #ef4444;
+            --ok: #10b981;
+            --rec: #ef4444;
+            --shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 2px 8px rgba(15, 23, 42, .04);
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --accent: #818cf8;
+                --accent-press: #6366f1;
+                --accent-soft: #1e293b;
+                --bg: #0f172a;
+                --panel: #111827;
+                --card: #1e293b;
+                --border: #334155;
+                --text: #e2e8f0;
+                --muted: #94a3b8;
+                --shadow: 0 1px 2px rgba(0, 0, 0, .3);
+            }
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            width: 380px;
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            font-size: 13px;
+        }
+
+        /* Header */
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 16px;
+            background: linear-gradient(135deg, var(--accent), var(--accent-press));
+            color: #fff;
+        }
+        .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; }
+        .brand .logo { font-size: 18px; }
+        .header-right { display: flex; align-items: center; gap: 8px; }
+        .pill {
+            display: inline-flex; align-items: center; gap: 6px;
+            font-size: 11px; font-weight: 600;
+            background: rgba(255, 255, 255, .18);
+            padding: 4px 9px; border-radius: 999px;
+        }
+        .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: #cbd5e1; }
+        .pill.recording .dot { background: var(--rec); animation: blink 1s infinite; }
+        .pill.replaying .dot { background: var(--ok); animation: blink 1.6s infinite; }
+        @keyframes blink { 50% { opacity: .3; } }
+        .gear { border: none; background: rgba(255,255,255,.18); color: #fff; width: 28px; height: 28px; border-radius: 8px; cursor: pointer; font-size: 14px; line-height: 1; display: flex; align-items: center; justify-content: center; }
+        .gear:hover { background: rgba(255,255,255,.3); }
+
+        /* Settings panel (top) */
+        .settings-panel { padding: 12px 16px; background: var(--accent-soft); border-bottom: 1px solid var(--border); }
+        .settings-panel[hidden] { display: none; }
+
+        /* Tabs */
+        .tabs { display: flex; padding: 0 8px; background: var(--bg); border-bottom: 1px solid var(--border); }
+        .tab {
+            flex: 1; padding: 11px 4px; border: none; background: none;
+            color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer;
+            border-bottom: 2px solid transparent; transition: .15s;
+        }
+        .tab:hover { color: var(--text); }
+        .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+        /* Panels */
+        .panel { display: none; padding: 14px 16px; }
+        .panel.active { display: block; }
+
+        label.field { display: block; font-size: 11px; font-weight: 600; color: var(--muted); margin-bottom: 5px; }
+        input[type="text"] {
+            width: 100%; padding: 9px 11px; border: 1px solid var(--border);
+            border-radius: 8px; background: var(--card); color: var(--text);
+            font-size: 13px; outline: none; transition: .15s;
+        }
+        input[type="text"]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); padding: 6px 12px; margin: 12px 0; }
+        .card-head { display: flex; align-items: center; justify-content: space-between; padding: 7px 0 6px; }
+        .card-head .title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+        .mini-link { font-size: 11px; color: var(--accent); cursor: pointer; font-weight: 600; user-select: none; }
+        .mini-link:hover { text-decoration: underline; }
+
+        .opt { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-top: 1px solid var(--border); }
+        .opt:first-of-type { border-top: none; }
+        .opt-label { display: flex; align-items: center; gap: 8px; }
+        .opt-label .ico { width: 18px; text-align: center; }
+
+        /* Toggle switch */
+        .switch { position: relative; display: inline-block; width: 36px; height: 20px; flex: none; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; inset: 0; background: var(--border); border-radius: 999px; transition: .2s; }
+        .slider::before { content: ""; position: absolute; height: 14px; width: 14px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: .2s; box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+        .switch input:checked + .slider { background: var(--accent); }
+        .switch input:checked + .slider::before { transform: translateX(16px); }
+
+        /* Buttons */
+        button.btn {
+            width: 100%; padding: 11px; border: none; border-radius: 9px; cursor: pointer;
+            font-size: 13px; font-weight: 600; transition: .15s; margin-top: 8px;
+        }
+        button.btn.primary { background: var(--accent); color: #fff; }
+        button.btn.primary:hover { background: var(--accent-press); }
+        button.btn.ghost { background: var(--card); color: var(--text); border: 1px solid var(--border); }
+        button.btn.ghost:hover { border-color: var(--accent); color: var(--accent); }
+        button.btn.danger { background: var(--card); color: var(--danger); border: 1px solid var(--border); }
+        button.btn.danger:hover { border-color: var(--danger); background: var(--danger); color: #fff; }
+        button.btn:active { transform: translateY(1px); }
+        .row { display: flex; gap: 8px; }
+        .row > .btn { margin-top: 0; }
+
+        /* Library */
+        .lib-empty { text-align: center; color: var(--muted); padding: 24px 0; font-size: 12px; }
+        .snap { display: flex; align-items: flex-start; gap: 8px; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); margin-bottom: 8px; }
+        .snap-main { flex: 1; min-width: 0; }
+        .snap-title { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .snap-url { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+        .snap-meta { font-size: 10px; color: var(--muted); margin-top: 4px; display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+        .chip { background: var(--accent-soft); color: var(--accent); border-radius: 5px; padding: 1px 5px; font-weight: 600; }
+        .snap-actions { display: flex; flex-direction: column; gap: 4px; }
+        .icon-btn { border: 1px solid var(--border); background: var(--card); color: var(--text); border-radius: 7px; width: 30px; height: 26px; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center; }
+        .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
+        .icon-btn.del:hover { border-color: var(--danger); color: var(--danger); }
+
+        /* Status */
+        .status-bar { padding: 9px 16px; background: var(--panel); border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); min-height: 34px; display: flex; align-items: center; gap: 6px; }
+        .status-bar.ok { color: var(--ok); }
+        .status-bar.err { color: var(--danger); }
+
+        .hint { font-size: 11px; color: var(--muted); margin-top: 6px; line-height: 1.4; }
     </style>
 </head>
 <body>
-    <div class="group">
-        <h4>Run</h4>
-        <button id="btnStart">Initialize recording</button>
-    </div>
-
-    <div class="group">
-        <h4>Record</h4>
-        <input type="text" id="snapshotName" placeholder="Snapshot name (optional)">
-        <div style="margin-top:6px"> 
-            <strong style="font-size:12px">Save options</strong>
-            <label style="display:flex;align-items:center;margin-top:6px;font-size:12px;gap:4px;">
-                <input type="checkbox" id="saveCookies" style="width:auto;margin-top:0;">
-                <span>Save Cookies</span>
-            </label>
-            <label style="display:flex;align-items:center;margin-top:4px;font-size:12px;gap:4px;">
-                <input type="checkbox" id="saveLocalStorage" style="width:auto;margin-top:0;">
-                <span>Save LocalStorage</span>
-            </label>
-            <label style="display:flex;align-items:center;margin-top:4px;font-size:12px;gap:4px;">
-                <input type="checkbox" id="saveSessionStorage" style="width:auto;margin-top:0;">
-                <span>Save SessionStorage</span>
-            </label>
-            <label style="display:flex;align-items:center;margin-top:4px;font-size:12px;gap:4px;">
-                <input type="checkbox" id="saveNetwork" style="width:auto;margin-top:0;">
-                <span>Save Network logs (fetch/XHR/etc.)</span>
-            </label>
-            <label style="display:flex;align-items:center;margin-top:6px;font-size:12px;gap:4px;">
-                <input type="checkbox" id="includeDom" style="width:auto;margin-top:0;">
-                <span>Save DOM snapshot (HTML)</span>
-            </label>
+    <header>
+        <div class="brand"><span class="logo">📸</span> StateSnap</div>
+        <div class="header-right">
+            <div class="pill" id="recBadge"><span class="dot"></span><span id="recBadgeText">Idle</span></div>
+            <button class="gear" id="btnGear" title="Settings">⚙️</button>
         </div>
-        <button id="btnSave">Save to MongoDB</button>
-    </div>
+    </header>
 
-    <div class="group">
-        <h4>Apply</h4>
-        <input type="text" id="snapshotId" placeholder="Snapshot ID or name">
-        <div style="margin-top:6px"> 
-            <strong style="font-size:12px">Load / Apply options</strong>
-            <label style="display:flex;align-items:center;margin-top:6px;font-size:12px;gap:4px;">
-                <input type="checkbox" id="applyCookies" style="width:auto;margin-top:0;">
-                <span>Apply Cookies</span>
-            </label>
-            <label style="display:flex;align-items:center;margin-top:4px;font-size:12px;gap:4px;">
-                <input type="checkbox" id="applyLocalStorage" style="width:auto;margin-top:0;">
-                <span>Apply LocalStorage</span>
-            </label>
-            <label style="display:flex;align-items:center;margin-top:4px;font-size:12px;gap:4px;">
-                <input type="checkbox" id="applySessionStorage" style="width:auto;margin-top:0;">
-                <span>Apply SessionStorage</span>
-            </label>
-            <label style="display:flex;align-items:center;margin-top:4px;font-size:12px;gap:4px;">
-                <input type="checkbox" id="applyNetwork" style="width:auto;margin-top:0;">
-                <span>Apply Network mocks</span>
-            </label>
-            <label style="display:flex;align-items:center;margin-top:6px;font-size:12px;gap:4px;">
-                <input type="checkbox" id="applyDom" style="width:auto;margin-top:0;">
-                <span>Apply DOM snapshot (HTML)</span>
-            </label>
+    <section class="settings-panel" id="settingsPanel" hidden>
+        <label class="field" for="settingsApiUrl">Backend URL (shared across all tabs)</label>
+        <input type="text" id="settingsApiUrl" placeholder="http://localhost:8080">
+        <button class="btn ghost" id="btnSaveSettings" style="margin-top:8px;">Save settings</button>
+    </section>
+
+    <nav class="tabs">
+        <button class="tab active" data-tab="record">Record</button>
+        <button class="tab" data-tab="apply">Apply</button>
+        <button class="tab" data-tab="library">Library</button>
+    </nav>
+
+    <!-- RECORD -->
+    <section class="panel active" data-panel="record">
+        <label class="field" for="snapshotName">Snapshot name (optional)</label>
+        <input type="text" id="snapshotName" placeholder="e.g. checkout-bug-repro">
+
+        <div class="card">
+            <div class="card-head">
+                <span class="title">What to capture</span>
+                <span class="mini-link" id="saveAll">Toggle all</span>
+            </div>
+            <label class="opt"><span class="opt-label"><span class="ico">🍪</span> Cookies</span>
+                <span class="switch"><input type="checkbox" id="saveCookies" checked><span class="slider"></span></span></label>
+            <label class="opt"><span class="opt-label"><span class="ico">💾</span> LocalStorage</span>
+                <span class="switch"><input type="checkbox" id="saveLocalStorage" checked><span class="slider"></span></span></label>
+            <label class="opt"><span class="opt-label"><span class="ico">🗂️</span> SessionStorage</span>
+                <span class="switch"><input type="checkbox" id="saveSessionStorage" checked><span class="slider"></span></span></label>
+            <label class="opt"><span class="opt-label"><span class="ico">🌐</span> Network logs</span>
+                <span class="switch"><input type="checkbox" id="saveNetwork" checked><span class="slider"></span></span></label>
+            <label class="opt"><span class="opt-label"><span class="ico">📄</span> DOM snapshot</span>
+                <span class="switch"><input type="checkbox" id="includeDom"><span class="slider"></span></span></label>
         </div>
-        <button id="btnLoad">Load and apply</button>
-    </div>
 
-    <!-- <div class="group">
-        <h4>Test</h4>
-        <button id="btnTest" style="margin-top:6px;">Test capture</button>
-    </div> -->
+        <button class="btn ghost" id="btnStart">Initialize recording</button>
+        <button class="btn primary" id="btnSave">Save snapshot</button>
+        <div class="hint">Initialize reloads the page and starts capturing network traffic from the very first request. Then reproduce your scenario and hit <strong>Save</strong>.</div>
+        <span class="mini-link" id="btnTest" style="display:inline-block;margin-top:10px;">Run capture test</span>
+    </section>
 
-    <div class="group">
-        <h4>Status</h4>
-        <div id="status">Ready</div>
-    </div>
-    
+    <!-- APPLY -->
+    <section class="panel" data-panel="apply">
+        <label class="field" for="snapshotId">Snapshot ID or name</label>
+        <input type="text" id="snapshotId" placeholder="Paste an ID or type a saved name">
+
+        <div class="card">
+            <div class="card-head">
+                <span class="title">What to apply</span>
+                <span class="mini-link" id="applyAll">Toggle all</span>
+            </div>
+            <label class="opt"><span class="opt-label"><span class="ico">🍪</span> Cookies</span>
+                <span class="switch"><input type="checkbox" id="applyCookies" checked><span class="slider"></span></span></label>
+            <label class="opt"><span class="opt-label"><span class="ico">💾</span> LocalStorage</span>
+                <span class="switch"><input type="checkbox" id="applyLocalStorage" checked><span class="slider"></span></span></label>
+            <label class="opt"><span class="opt-label"><span class="ico">🗂️</span> SessionStorage</span>
+                <span class="switch"><input type="checkbox" id="applySessionStorage" checked><span class="slider"></span></span></label>
+            <label class="opt"><span class="opt-label"><span class="ico">🌐</span> Network mocks</span>
+                <span class="switch"><input type="checkbox" id="applyNetwork"><span class="slider"></span></span></label>
+            <label class="opt"><span class="opt-label"><span class="ico">📄</span> DOM snapshot</span>
+                <span class="switch"><input type="checkbox" id="applyDom"><span class="slider"></span></span></label>
+        </div>
+
+        <button class="btn primary" id="btnLoad">Load &amp; apply</button>
+        <div class="row" style="margin-top:8px;">
+            <button class="btn ghost" id="btnStop">⏹ Stop replaying</button>
+            <button class="btn danger" id="btnClear">🧹 Clear applied</button>
+        </div>
+        <div class="hint"><strong>Stop replaying</strong> clears the network mocks and reloads with the live network. <strong>Clear applied</strong> additionally removes the cookies and storage keys this snapshot set, then reloads.</div>
+    </section>
+
+    <!-- LIBRARY -->
+    <section class="panel" data-panel="library">
+        <div class="card-head">
+            <span class="title">Recent snapshots</span>
+            <span class="mini-link" id="btnRefresh">↻ Refresh</span>
+        </div>
+        <div id="libraryList"><div class="lib-empty">Loading…</div></div>
+    </section>
+
+    <div class="status-bar" id="status">Ready</div>
+
     <script src="popup.js"></script>
 </body>
 </html>

@@ -1,166 +1,139 @@
-// Universal replayer: fully mocks fetch + XHR based on recorded NetworkLog entries
+// StateSnap replayer.
+// Runs in the page's MAIN world at document_start (registered as a content
+// script in manifest.json). It activates only when a replay payload is present
+// in sessionStorage, which the popup writes right before reloading the tab.
+// Installing here — instead of via executeScript before a reload — means the
+// fetch/XHR mocks survive the reload and are in place before the page's own
+// scripts run. Unmatched requests fall through to the real network instead of
+// being hard-failed, so replayed pages don't break on un-recorded calls.
 (function () {
-    const SNAPSHOT = window.__STATESNAP;
-    if (!SNAPSHOT) {
-        console.error("No snapshot data found for replay!");
+    if (window.__STATESNAP_REPLAY_INSTALLED) return;
+
+    var payload = null;
+    try {
+        var raw = sessionStorage.getItem('__STATESNAP_REPLAY');
+        if (!raw) return;
+        payload = JSON.parse(raw);
+    } catch (e) {
         return;
     }
+    if (!payload) return;
 
+    window.__STATESNAP_REPLAY_INSTALLED = true;
     console.log("%c ▶️ REPLAY MODE ", "background: green; color: white; padding: 4px;");
 
-    if (SNAPSHOT.html) {
-        console.log("[StateSnap][replayer] Snapshot contains DOM HTML (length):", SNAPSHOT.html.length);
-        // Optional helper to manually apply DOM from the console if needed.
-        window.__STATESNAP_applyDomSnapshot = function () {
-            try {
-                document.open();
-                document.write(SNAPSHOT.html);
-                document.close();
-            } catch (e) {
-                console.error("[StateSnap][replayer] Error applying DOM snapshot via helper", e);
-            }
-        };
-    }
+    var logs = Array.isArray(payload.networkLogs) ? payload.networkLogs : [];
 
-    // 1. Restore Storage
-    try {
-        localStorage.clear();
-        sessionStorage.clear();
-    } catch (e) {
-        console.warn("Unable to clear storage during replay", e);
-    }
+    // Capture native implementations before patching (used for pass-through).
+    var nativeFetch = window.fetch ? window.fetch.bind(window) : null;
+    var NativeXHROpen = window.XMLHttpRequest && window.XMLHttpRequest.prototype.open;
+    var NativeXHRSend = window.XMLHttpRequest && window.XMLHttpRequest.prototype.send;
 
-    if (SNAPSHOT.localStorage) {
+    function normalizeUrl(u) {
         try {
-            Object.entries(SNAPSHOT.localStorage).forEach(([k, v]) => localStorage.setItem(k, v));
-        } catch (e) {
-            console.warn("Error restoring localStorage from snapshot", e);
-        }
-    }
-    if (SNAPSHOT.sessionStorage) {
-        try {
-            Object.entries(SNAPSHOT.sessionStorage).forEach(([k, v]) => sessionStorage.setItem(k, v));
-        } catch (e) {
-            console.warn("Error restoring sessionStorage from snapshot", e);
-        }
-    }
-
-    const logs = Array.isArray(SNAPSHOT.networkLogs) ? SNAPSHOT.networkLogs : [];
-
-    const normalizeUrl = (u) => {
-        try {
-            const url = new URL(u, window.location.origin);
-            // Strip hash for matching
+            var url = new URL(u, window.location.origin);
             url.hash = "";
             return url.toString();
-        } catch {
+        } catch (e) {
             return String(u);
         }
-    };
+    }
 
-    const findMatch = (method, url, body) => {
-        const normUrl = normalizeUrl(url);
-        const bodyStr = body != null ? String(body) : null;
-
-        return logs.find((log) => {
+    function findMatch(method, url, body) {
+        var normUrl = normalizeUrl(url);
+        var bodyStr = body != null ? String(body) : null;
+        return logs.find(function (log) {
             if (!log || !log.url) return false;
-            const logUrl = normalizeUrl(log.url);
             if ((log.method || "").toUpperCase() !== method) return false;
+            var logUrl = normalizeUrl(log.url);
 
             if (log.requestBody != null) {
-                const logBody = String(log.requestBody);
-                const reqBody = bodyStr != null ? bodyStr : "";
+                var logBody = String(log.requestBody);
+                var reqBody = bodyStr != null ? bodyStr : "";
                 if (logBody !== reqBody) return false;
             }
 
-            // 1) Strict equality
             if (logUrl === normUrl) return true;
-
-            // 2) fallback: prefixes (helps with slight differences in query/CDN tails)
-            if (logUrl.length > 0 && (normUrl.startsWith(logUrl) || logUrl.startsWith(normUrl))) {
-                return true;
-            }
-
+            if (logUrl.length > 0 && (normUrl.startsWith(logUrl) || logUrl.startsWith(normUrl))) return true;
             return false;
         });
-    };
+    }
 
-    // 2. Mock fetch
-    window.fetch = async (input, init) => {
-        const url = input instanceof Request ? input.url : input;
-        const method = (input instanceof Request ? input.method : (init?.method || "GET")).toUpperCase();
-        const body = input instanceof Request ? input.body : init?.body;
-
-        const match = findMatch(method, url, body);
-
-        if (match) {
-            console.log(`[MOCK][fetch] ${method} ${url}`);
-            return new Response(match.responseBody ?? "", {
-                status: match.status ?? 200,
-                statusText: "OK (Mocked)",
-                headers: { "Content-Type": "application/json" }
-            });
-        }
-
-        console.warn(`[MISS][fetch] ${method} ${url} — blocking (no recorded entry)`);
-        return new Response(JSON.stringify({ error: "No recorded state for this request" }), { status: 404 });
-    };
-
-    // 3. Mock XHR
-    const OriginalXHR = window.XMLHttpRequest;
-    function MockedXHR() {
-        const xhr = new OriginalXHR();
-        let method = "GET";
-        let url = "";
-        let requestBody = null;
-
-        const origOpen = xhr.open;
-        xhr.open = function (m, u, ...rest) {
-            method = (m || "GET").toUpperCase();
-            url = u;
-            return origOpen.call(xhr, m, u, ...rest);
-        };
-
-        const origSend = xhr.send;
-        xhr.send = function (body) {
-            requestBody = body != null ? String(body) : null;
-
-            const match = findMatch(method, url, requestBody);
+    // --- Mock fetch (pass-through on miss) ---
+    if (logs.length && nativeFetch) {
+        window.fetch = function (input, init) {
+            var url = input instanceof Request ? input.url : input;
+            var method = (input instanceof Request ? input.method : ((init && init.method) || "GET")).toUpperCase();
+            var body = input instanceof Request ? input.body : (init && init.body);
+            var match = findMatch(method, url, body);
 
             if (match) {
-                console.log(`[MOCK][xhr] ${method} ${url}`);
-                setTimeout(() => {
-                    try {
-                        Object.defineProperty(xhr, "status", { value: match.status ?? 200, configurable: true });
-                        Object.defineProperty(xhr, "responseText", { value: match.responseBody ?? "", configurable: true });
-                        xhr.readyState = 4;
-                        xhr.dispatchEvent(new Event("readystatechange"));
-                        xhr.dispatchEvent(new Event("load"));
-                    } catch (e) {
-                        console.error("Error simulating XHR response", e);
-                    }
-                }, 0);
-                return;
+                console.log("[MOCK][fetch] " + method + " " + url);
+                return Promise.resolve(new Response(match.responseBody != null ? match.responseBody : "", {
+                    status: match.status != null ? match.status : 200,
+                    statusText: "OK (Mocked)",
+                    headers: { "Content-Type": "application/json" }
+                }));
             }
 
-            console.warn(`[MISS][xhr] ${method} ${url} — blocking (no recorded entry)`);
-            setTimeout(() => {
+            console.warn("[MISS][fetch] " + method + " " + url + " — passing through to network");
+            return nativeFetch(input, init);
+        };
+    }
+
+    // --- Mock XHR (pass-through on miss) ---
+    if (logs.length && NativeXHROpen && NativeXHRSend) {
+        window.XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+            this.__statesnap_method = (method || "GET").toUpperCase();
+            this.__statesnap_url = url;
+            return NativeXHROpen.apply(this, [method, url, ...rest]);
+        };
+
+        window.XMLHttpRequest.prototype.send = function (body) {
+            var requestBody = body != null ? String(body) : null;
+            var match = findMatch(this.__statesnap_method || "GET", this.__statesnap_url || "", requestBody);
+
+            if (!match) {
+                console.warn("[MISS][xhr] " + (this.__statesnap_method || "GET") + " " + (this.__statesnap_url || "") + " — passing through to network");
+                return NativeXHRSend.apply(this, [body]);
+            }
+
+            console.log("[MOCK][xhr] " + this.__statesnap_method + " " + this.__statesnap_url);
+            var self = this;
+            setTimeout(function () {
                 try {
-                    Object.defineProperty(xhr, "status", { value: 404, configurable: true });
-                    Object.defineProperty(xhr, "responseText", { value: '{"error":"No recorded state for this request"}', configurable: true });
-                    xhr.readyState = 4;
-                    xhr.dispatchEvent(new Event("readystatechange"));
-                    xhr.dispatchEvent(new Event("load"));
+                    Object.defineProperty(self, "status", { value: match.status != null ? match.status : 200, configurable: true });
+                    Object.defineProperty(self, "responseText", { value: match.responseBody != null ? match.responseBody : "", configurable: true });
+                    Object.defineProperty(self, "readyState", { value: 4, configurable: true });
+                    self.dispatchEvent(new Event("readystatechange"));
+                    self.dispatchEvent(new Event("load"));
                 } catch (e) {
-                    console.error("Error simulating XHR miss", e);
+                    console.error("StateSnap: error simulating XHR response", e);
                 }
             }, 0);
         };
-
-        return xhr;
     }
 
-    window.XMLHttpRequest = MockedXHR;
+    // --- Optional: apply the recorded DOM as a frozen view (no script re-exec) ---
+    if (payload.html) {
+        var applyDom = function () {
+            try {
+                var parsed = new DOMParser().parseFromString(payload.html, "text/html");
+                document.replaceChild(
+                    document.importNode(parsed.documentElement, true),
+                    document.documentElement
+                );
+                console.log("[StateSnap][replayer] Applied DOM snapshot (frozen view).");
+            } catch (e) {
+                console.error("StateSnap: error applying DOM snapshot", e);
+            }
+        };
+        if (document.readyState === "loading") {
+            document.addEventListener("DOMContentLoaded", applyDom, { once: true });
+        } else {
+            applyDom();
+        }
+    }
 
-    console.log("State restored. All network traffic is now fully mocked.");
+    console.log("StateSnap: replay active. Network is mocked; unmatched requests hit the real network.");
 })();

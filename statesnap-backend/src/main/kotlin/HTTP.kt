@@ -16,6 +16,7 @@ fun Application.configureHTTP() {
         allowMethod(HttpMethod.Delete)
         allowMethod(HttpMethod.Patch)
         allowHeader(HttpHeaders.Authorization)
+        allowHeader(HttpHeaders.ContentType) // required for JSON POST preflight
         anyHost() // TODO: Don't do this in production!
     }
 }

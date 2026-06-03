@@ -1,66 +1,102 @@
+// StateSnap recorder.
+// Runs in the page's MAIN world at document_start (registered as a content
+// script in manifest.json) so that fetch/XHR are patched *before* the page's
+// own scripts fire their first requests. Recording is gated on a per-origin
+// sessionStorage flag and the captured logs are persisted to sessionStorage so
+// they survive same-origin reloads/navigations during a recording session.
 (function () {
-    if (window._isRecording) return;
+    // Guard against double-install (content script + any manual injection).
+    if (window.__STATESNAP_REC_INSTALLED) return;
+
+    // Only activate when recording was initialized for this origin.
+    var recording = false;
+    try {
+        recording = sessionStorage.getItem('__STATESNAP_RECORDING') === 'true';
+    } catch (e) { /* storage may be unavailable (sandboxed frame) */ }
+    if (!recording) return;
+
+    window.__STATESNAP_REC_INSTALLED = true;
     window._isRecording = true;
-    window._networkLogs = [];
+
+    var LOGS_KEY = '__STATESNAP_LOGS';
+    var MAX_BUFFER_CHARS = 4 * 1024 * 1024; // keep under the ~5MB sessionStorage quota
+
+    // Restore any logs captured on previous (same-origin) page loads.
+    function loadBuffer() {
+        try {
+            var raw = sessionStorage.getItem(LOGS_KEY);
+            if (!raw) return [];
+            var parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (e) {
+            return [];
+        }
+    }
+
+    window._networkLogs = loadBuffer();
+
+    // Throttled persistence so we don't serialize on every single request.
+    var persistTimer = null;
+    function persistSoon() {
+        if (persistTimer) return;
+        persistTimer = setTimeout(function () {
+            persistTimer = null;
+            try {
+                var serialized = JSON.stringify(window._networkLogs);
+                if (serialized.length <= MAX_BUFFER_CHARS) {
+                    sessionStorage.setItem(LOGS_KEY, serialized);
+                }
+            } catch (e) { /* quota or serialization issues are non-fatal */ }
+        }, 250);
+    }
+
+    function record(entry) {
+        try {
+            window._networkLogs.push(entry);
+            persistSoon();
+        } catch (e) { /* ignore */ }
+    }
 
     console.log("%c 🔴 RECORDER STARTED ", "background: red; color: white; padding: 4px;");
 
-    // Helper: attempt to detect XHR creation via constructor proxy (best-effort)
-    try {
-        const NativeXHR = window.XMLHttpRequest;
-        if (NativeXHR) {
-            const XProxy = function () {
-                // eslint-disable-next-line no-console
-                console.log('[REC][xhr new] constructor called');
-                return new NativeXHR();
-            };
-            XProxy.prototype = NativeXHR.prototype;
-            window.XMLHttpRequest = XProxy;
-        }
-    } catch (e) {
-        console.warn('Could not proxy XHR constructor', e);
-    }
-
-    // Instrument navigator.sendBeacon
+    // --- navigator.sendBeacon ---
     try {
         if (navigator && typeof navigator.sendBeacon === 'function') {
-            const origBeacon = navigator.sendBeacon.bind(navigator);
+            var origBeacon = navigator.sendBeacon.bind(navigator);
             navigator.sendBeacon = function (url, data) {
-                try {
-                    window._networkLogs.push({
-                        method: 'BEACON',
-                        url: String(url),
-                        requestBody: typeof data === 'string' ? data : null,
-                        status: null,
-                        responseBody: null,
-                        ts: Date.now()
-                    });
-                } catch (e) { /* ignore */ }
+                record({
+                    method: 'BEACON',
+                    url: String(url),
+                    requestBody: typeof data === 'string' ? data : null,
+                    status: null,
+                    responseBody: null,
+                    ts: Date.now()
+                });
                 return origBeacon(url, data);
             };
         }
     } catch (e) { /* ignore */ }
 
-    // Instrument WebSocket send
+    // --- WebSocket send ---
     try {
-        const NativeWS = window.WebSocket;
+        var NativeWS = window.WebSocket;
         if (NativeWS) {
-            const WSProxy = function (url, protocols) {
-                const ws = protocols !== undefined ? new NativeWS(url, protocols) : new NativeWS(url);
+            var WSProxy = function (url, protocols) {
+                var ws = protocols !== undefined ? new NativeWS(url, protocols) : new NativeWS(url);
                 try {
-                    const _url = url;
-                    const origSend = ws.send;
+                    var _url = url;
+                    var origSend = ws.send;
                     ws.send = function (data) {
-                        try {
-                            window._networkLogs.push({
-                                method: 'WS-SEND',
-                                url: String(_url),
-                                requestBody: typeof data === 'string' ? data : (typeof data === 'object' ? JSON.stringify(data) : String(data)),
-                                status: null,
-                                responseBody: null,
-                                ts: Date.now()
-                            });
-                        } catch (e) { /* ignore */ }
+                        record({
+                            method: 'WS-SEND',
+                            url: String(_url),
+                            requestBody: typeof data === 'string'
+                                ? data
+                                : (typeof data === 'object' ? (function () { try { return JSON.stringify(data); } catch (e) { return String(data); } })() : String(data)),
+                            status: null,
+                            responseBody: null,
+                            ts: Date.now()
+                        });
                         return origSend.call(this, data);
                     };
                 } catch (e) { /* ignore */ }
@@ -71,97 +107,81 @@
         }
     } catch (e) { /* ignore */ }
 
-    // --- FETCH ---
-    const originalFetch = window.fetch;
-    window.fetch = async (...args) => {
-        const input = args[0];
-        const init = args[1] || {};
-        const url = input instanceof Request ? input.url : input;
-        const method = (input instanceof Request ? input.method : init.method || "GET").toUpperCase();
-        let reqBodyStr = null;
+    // --- fetch ---
+    var originalFetch = window.fetch;
+    if (typeof originalFetch === 'function') {
+        window.fetch = async function (...args) {
+            var input = args[0];
+            var init = args[1] || {};
+            var url = input instanceof Request ? input.url : input;
+            var method = (input instanceof Request ? input.method : (init.method || "GET")).toUpperCase();
+            var reqBodyStr = null;
 
-        try {
-            if (input instanceof Request) {
-                // Try to read request body from cloned Request
-                await input.clone().text().then(t => { reqBodyStr = t; }).catch(() => { /* ignore */ });
-            } else if (init && init.body != null) {
-                reqBodyStr = String(init.body);
-            }
-        } catch (_) { /* ignore */ }
-
-        console.log(`[REC][fetch] ${method} ${url}`);
-
-        const response = await originalFetch(...args);
-        const clone = response.clone();
-
-        const pushLog = (text) => {
             try {
-                window._networkLogs.push({
+                if (input instanceof Request) {
+                    await input.clone().text().then(function (t) { reqBodyStr = t; }).catch(function () {});
+                } else if (init && init.body != null) {
+                    reqBodyStr = String(init.body);
+                }
+            } catch (_) { /* ignore */ }
+
+            var response = await originalFetch.apply(this, args);
+
+            try {
+                var clone = response.clone();
+                var text = await clone.text().catch(function () { return ""; });
+                record({
                     method: method,
-                    url: url,
+                    url: String(url),
                     requestBody: reqBodyStr,
                     status: response.status,
                     responseBody: text,
                     ts: Date.now()
                 });
             } catch (e) {
-                console.error("Error pushing fetch log", e);
+                record({ method: method, url: String(url), requestBody: reqBodyStr, status: response.status, responseBody: "", ts: Date.now() });
             }
+
+            return response;
         };
+    }
 
-        // Opaque/binary responses can throw on text(); fall back to empty string
-        try {
-            const text = await clone.text();
-            pushLog(text);
-        } catch (_) {
-            pushLog("");
-        }
-
-        return response;
-    };
-
-    // --- XHR (prototype patch, more reliable) ---
+    // --- XMLHttpRequest (prototype patch) ---
     try {
-        const OriginalXHR = window.XMLHttpRequest;
-        if (OriginalXHR && OriginalXHR.prototype) {
-            const origOpenProto = OriginalXHR.prototype.open;
-            const origSendProto = OriginalXHR.prototype.send;
+        var XHR = window.XMLHttpRequest;
+        if (XHR && XHR.prototype) {
+            var origOpen = XHR.prototype.open;
+            var origSend = XHR.prototype.send;
 
-            OriginalXHR.prototype.open = function (method, url, ...rest) {
+            XHR.prototype.open = function (method, url, ...rest) {
                 try {
-                    this.__statesnap_xhr_method = (method || 'GET').toUpperCase();
-                    this.__statesnap_xhr_url = url;
+                    this.__statesnap_method = (method || 'GET').toUpperCase();
+                    this.__statesnap_url = url;
                 } catch (e) { /* ignore */ }
-                return origOpenProto.apply(this, [method, url, ...rest]);
+                return origOpen.apply(this, [method, url, ...rest]);
             };
 
-            OriginalXHR.prototype.send = function (body) {
+            XHR.prototype.send = function (body) {
                 try {
-                    this.__statesnap_xhr_body = body != null ? String(body) : null;
-                    console.log(`[REC][xhr send] ${this.__statesnap_xhr_method || 'GET'} ${this.__statesnap_xhr_url || ''}`);
-
-                    this.addEventListener('load', () => {
+                    this.__statesnap_body = body != null ? String(body) : null;
+                    var self = this;
+                    this.addEventListener('load', function () {
                         try {
-                            const responseText = this.responseText;
-                            window._networkLogs.push({
-                                method: this.__statesnap_xhr_method || 'GET',
-                                url: this.__statesnap_xhr_url || '',
-                                requestBody: this.__statesnap_xhr_body,
-                                status: this.status,
-                                responseBody: responseText,
+                            record({
+                                method: self.__statesnap_method || 'GET',
+                                url: self.__statesnap_url || '',
+                                requestBody: self.__statesnap_body,
+                                status: self.status,
+                                responseBody: (function () { try { return self.responseText; } catch (e) { return ""; } })(),
                                 ts: Date.now()
                             });
-                        } catch (e) {
-                            console.error('Error logging XHR (proto)', e);
-                        }
+                        } catch (e) { /* ignore */ }
                     });
-                } catch (e) {
-                    console.error('Error in patched XHR.send', e);
-                }
-                return origSendProto.apply(this, [body]);
+                } catch (e) { /* ignore */ }
+                return origSend.apply(this, [body]);
             };
         }
     } catch (e) {
-        console.warn('XHR prototype patch failed:', e);
+        console.warn('StateSnap: XHR patch failed', e);
     }
 })();

@@ -10,7 +10,19 @@ import org.bson.BsonObjectId
 import org.bson.BsonString
 import org.bson.BsonValue
 import org.litote.kmongo.coroutine.CoroutineCollection
+import org.litote.kmongo.descending
 import org.litote.kmongo.eq
+
+// Resolve a snapshot by Mongo _id first, falling back to its description.
+// findOneById throws on a non-ObjectId string, so guard it instead of 500ing.
+private suspend fun CoroutineCollection<Snapshot>.findByIdOrDescription(term: String): Snapshot? {
+    val byId = try {
+        findOneById(term)
+    } catch (e: Exception) {
+        null
+    }
+    return byId ?: findOne(Snapshot::description eq term)
+}
 
 fun Application.configureRouting(snapshots: CoroutineCollection<Snapshot>) {
     routing {
@@ -21,9 +33,13 @@ fun Application.configureRouting(snapshots: CoroutineCollection<Snapshot>) {
             call.respondText("Snapshot Service is running...", ContentType.Text.Plain)
         }
 
-        // List recent snapshots
+        // List most recent snapshots (newest first).
         get("/snapshots") {
-            val list = snapshots.find().limit(20).toList()
+            val limit = call.request.queryParameters["limit"]?.toIntOrNull()?.coerceIn(1, 100) ?: 20
+            val list = snapshots.find()
+                .sort(descending(Snapshot::timestamp))
+                .limit(limit)
+                .toList()
             call.respond(list)
         }
 
@@ -56,7 +72,7 @@ fun Application.configureRouting(snapshots: CoroutineCollection<Snapshot>) {
             }
         }
 
-        // Get snapshot by ID
+        // Get snapshot by ID or description.
         get("/snapshot/{id}") {
             val id = call.parameters["id"]
             if (id == null) {
@@ -64,36 +80,11 @@ fun Application.configureRouting(snapshots: CoroutineCollection<Snapshot>) {
                 return@get
             }
 
-            // Try to find by _id
-            val doc = snapshots.findOneById(id) ?: run {
-                // If not found, try to find by description
-                snapshots.findOne(Snapshot::description eq id)
-            }
-
+            val doc = snapshots.findByIdOrDescription(id)
             if (doc != null) {
                 call.respond(doc)
             } else {
                 call.respond(HttpStatusCode.NotFound, StatusResponse("error", "Snapshot id:$id not found"))
-            }
-        }
-
-        // Lookup by id or description (tries _id first, then description)
-        get("/snapshot/lookup/{term}") {
-            val term = call.parameters["term"]
-            if (term == null) {
-                call.respond(HttpStatusCode.BadRequest, StatusResponse("error", "Missing term "))
-                return@get
-            }
-
-            var doc = snapshots.findOneById(term)
-            if (doc == null) {
-                doc = snapshots.findOne(Snapshot::description eq term)
-            }
-
-            if (doc != null) {
-                call.respond(doc)
-            } else {
-                call.respond(HttpStatusCode.NotFound, StatusResponse("error", "Snapshot not found for term:$term"))
             }
         }
 
@@ -104,7 +95,13 @@ fun Application.configureRouting(snapshots: CoroutineCollection<Snapshot>) {
                 return@delete
             }
 
-            val result = snapshots.deleteOneById(id)
+            val result = try {
+                snapshots.deleteOneById(id)
+            } catch (e: Exception) {
+                call.respond(HttpStatusCode.BadRequest, StatusResponse("error", "Invalid id:$id"))
+                return@delete
+            }
+
             if (result.deletedCount > 0) {
                 call.respond(HttpStatusCode.OK, StatusResponse("success", "Snapshot id:$id deleted"))
             } else {
